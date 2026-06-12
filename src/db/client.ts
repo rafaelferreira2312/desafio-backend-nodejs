@@ -1,11 +1,10 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 
+import { env } from "../config.js";
 import * as schema from "./schema.js";
 
-const databaseUrl = process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/atendimento";
-
-export const sql = postgres(databaseUrl, {
+export const sql = postgres(env.DATABASE_URL, {
   max: 10,
 });
 
