@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 
 import { env } from "../config.js";
 import { db } from "../db/client.js";
@@ -173,4 +173,37 @@ export async function persistInboundMessage(inbound: InboundMessage): Promise<Pe
 
 export async function markMessageQueued(messageId: string) {
   await db.update(messages).set({ status: "queued" }).where(eq(messages.id, messageId));
+}
+
+export async function listConversationsByTenant(tenantId: string) {
+  return db
+    .select({
+      contact: {
+        displayName: contacts.displayName,
+        waId: contacts.waId,
+      },
+      conversation: conversations,
+    })
+    .from(conversations)
+    .innerJoin(contacts, eq(conversations.contactId, contacts.id))
+    .where(eq(conversations.tenantId, tenantId))
+    .orderBy(desc(conversations.lastMessageAt), desc(conversations.createdAt));
+}
+
+export async function listMessagesByConversation(tenantId: string, conversationId: string) {
+  const [conversation] = await db
+    .select({ id: conversations.id })
+    .from(conversations)
+    .where(and(eq(conversations.id, conversationId), eq(conversations.tenantId, tenantId)))
+    .limit(1);
+
+  if (!conversation) {
+    return null;
+  }
+
+  return db
+    .select()
+    .from(messages)
+    .where(and(eq(messages.tenantId, tenantId), eq(messages.conversationId, conversationId)))
+    .orderBy(asc(messages.createdAt));
 }
