@@ -18,6 +18,14 @@ export type PersistInboundResult = {
   tenant: Tenant;
 };
 
+export type ProcessingContext = {
+  contact: Contact;
+  conversation: Conversation;
+  history: Message[];
+  inboundMessage: Message;
+  tenant: Tenant;
+};
+
 export async function getOrCreateTenant(phoneNumberId = env.META_PHONE_NUMBER_ID) {
   const slug = `phone-${phoneNumberId}`;
 
@@ -206,4 +214,92 @@ export async function listMessagesByConversation(tenantId: string, conversationI
     .from(messages)
     .where(and(eq(messages.tenantId, tenantId), eq(messages.conversationId, conversationId)))
     .orderBy(asc(messages.createdAt));
+}
+
+export async function getProcessingContext(tenantId: string, conversationId: string, messageId: string) {
+  const [row] = await db
+    .select({
+      contact: contacts,
+      conversation: conversations,
+      inboundMessage: messages,
+      tenant: tenants,
+    })
+    .from(messages)
+    .innerJoin(conversations, eq(messages.conversationId, conversations.id))
+    .innerJoin(contacts, eq(conversations.contactId, contacts.id))
+    .innerJoin(tenants, eq(messages.tenantId, tenants.id))
+    .where(
+      and(
+        eq(messages.id, messageId),
+        eq(messages.tenantId, tenantId),
+        eq(messages.conversationId, conversationId),
+      ),
+    )
+    .limit(1);
+
+  if (!row) {
+    return null;
+  }
+
+  const history = await db
+    .select()
+    .from(messages)
+    .where(and(eq(messages.tenantId, tenantId), eq(messages.conversationId, conversationId)))
+    .orderBy(asc(messages.createdAt));
+
+  return {
+    ...row,
+    history,
+  } satisfies ProcessingContext;
+}
+
+export async function persistOutboundMessage(input: {
+  body: string;
+  conversationId: string;
+  tenantId: string;
+}) {
+  const [message] = await db
+    .insert(messages)
+    .values({
+      body: input.body,
+      conversationId: input.conversationId,
+      direction: "outbound",
+      processedAt: new Date(),
+      status: "sent",
+      tenantId: input.tenantId,
+    })
+    .returning();
+
+  if (!message) {
+    throw new Error("Failed to create outbound message");
+  }
+
+  await db
+    .update(conversations)
+    .set({
+      lastMessageAt: message.createdAt,
+      updatedAt: new Date(),
+    })
+    .where(eq(conversations.id, input.conversationId));
+
+  return message;
+}
+
+export async function markMessageProcessed(messageId: string) {
+  await db
+    .update(messages)
+    .set({
+      processedAt: new Date(),
+    })
+    .where(eq(messages.id, messageId));
+}
+
+export async function markMessageFailed(messageId: string, errorMessage: string) {
+  await db
+    .update(messages)
+    .set({
+      errorMessage,
+      status: "failed",
+    })
+    .where(eq(messages.id, messageId));
 }
