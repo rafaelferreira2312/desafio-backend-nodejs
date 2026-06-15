@@ -1,165 +1,206 @@
-# Desafio Técnico — Desenvolvedor(a) Backend (Node.js)
+# Atendimento WhatsApp com IA
 
-> **Atendimento WhatsApp com IA** — um cenário real do nosso dia a dia.
+Backend em Node.js + TypeScript para receber webhooks assinados da Meta WhatsApp Cloud API, persistir conversas, processar mensagens de forma assíncrona e responder via OpenAI ou fallback controlado pela base de conhecimento.
 
-Bem-vindo(a)! Este desafio simula um problema que resolvemos de verdade na Myde: receber
-mensagens de clientes pelo **WhatsApp**, processá-las com uma **LLM (OpenAI)** e responder
-automaticamente — de forma assíncrona, segura e isolada por cliente (multi-tenant).
+## Stack
 
-Não buscamos o "código mais bonito". Buscamos entender **como você pensa**: as decisões de
-arquitetura, os trade-offs que você reconhece e o que você conscientemente deixou de fora.
+- Node.js 20+
+- TypeScript
+- Fastify
+- PostgreSQL
+- Drizzle ORM
+- Redis + BullMQ
+- OpenAI
+- Pino
+- Zod
+- Vitest
 
----
+## Como Rodar
 
-## 🎯 O que você vai construir
-
-Um backend em **Node.js + TypeScript** que:
-
-```
-   Cliente no WhatsApp
-        │  (mensagem)
-        ▼
-   Meta WhatsApp Cloud API
-        │  POST webhook (assinado)
-        ▼
- ┌─────────────────────────┐
- │   SEU BACKEND           │
- │  1. valida assinatura   │
- │  2. persiste a mensagem │
- │  3. enfileira o job ────┼──► fila (Redis/BullMQ ou SQS)
- │  4. responde 200 rápido │            │
- └─────────────────────────┘            ▼
-                                 ┌──────────────────┐
-                                 │   WORKER         │
-                                 │  - monta contexto│
-                                 │  - chama OpenAI  │
-                                 │  - envia resposta├──► Meta API (mock) ──► Cliente
-                                 └──────────────────┘
-```
-
-Para você focar no que importa, **já fornecemos** um servidor que **simula a Meta** (recebe
-seus envios e dispara webhooks assinados pra você), uma base de conhecimento e toda a infra
-local via Docker.
-
----
-
-## ✅ Requisitos
-
-### 1. Webhook da Meta
-- **Verificação (`GET /webhook`)**: responder ao handshake da Meta com o `hub.challenge`
-  quando o `hub.verify_token` bater com o seu `META_VERIFY_TOKEN`.
-- **Recebimento (`POST /webhook`)**: validar a assinatura `X-Hub-Signature-256`
-  (HMAC-SHA256 do **corpo cru** da requisição usando o `META_APP_SECRET`). Requisição com
-  assinatura inválida deve ser rejeitada.
-
-### 2. Persistência
-- Modele e persista **contatos**, **conversas** e **mensagens** (inbound e outbound).
-- Sugerimos **PostgreSQL + Drizzle ORM** (já no docker-compose), mas você pode usar outro
-  ORM/driver se justificar.
-
-### 3. Processamento assíncrono
-- **Não** chame a OpenAI dentro do handler do webhook. Responda `200` rápido e processe
-  em background.
-- Use **BullMQ + Redis** (fornecido) ou **SQS via LocalStack** (também fornecido) — sua escolha.
-
-### 4. Worker → OpenAI
-- O worker monta o contexto (histórico da conversa + `knowledge-base/`) e chama a OpenAI
-  para gerar a resposta.
-- A resposta deve se basear na base de conhecimento. Se a info não existir lá, o bot deve
-  dizer que não sabe (não inventar).
-- **Diferencial**: `function calling` para uma ação real (ex.: consultar status de um pedido
-  num endpoint mock).
-
-### 5. Envio da resposta
-- Envie a resposta via `POST http://mock-meta:8001/{phoneNumberId}/messages`
-  (mesma forma da API real da Meta). O mock loga o que recebeu.
-
-### 6. API REST mínima
-- `GET /conversations` — lista conversas (do tenant autenticado).
-- `GET /conversations/:id/messages` — mensagens de uma conversa.
-
-### 7. Aspectos transversais (é aqui que a gente repara)
-- **Idempotência**: a Meta reentrega o mesmo webhook (mesmo `message.id`). Não processe duas vezes.
-- **Multi-tenant**: cada cliente (tenant) só enxerga seus próprios dados.
-- **Resiliência**: erros na OpenAI/envio devem ter retry; o sistema não pode travar.
-- **Observabilidade**: logs estruturados que ajudem a depurar um atendimento específico.
-
----
-
-## 📦 O que já fornecemos
-
-| Item | Onde |
-|------|------|
-| Mock da Meta (dispara webhooks assinados + recebe envios) | [`mock-meta-server/`](mock-meta-server/) |
-| Base de conhecimento da empresa fictícia | [`knowledge-base/`](knowledge-base/) |
-| Infra local (Postgres, Redis, LocalStack, mock) | [`docker-compose.yml`](docker-compose.yml) |
-| Variáveis de ambiente de exemplo | [`.env.example`](.env.example) |
-| Esqueleto do projeto (package.json, tsconfig, drizzle) | raiz / [`src/`](src/) |
-| Guia para obter credenciais reais da Meta e OpenAI | [`SETUP-CREDENCIAIS.md`](SETUP-CREDENCIAIS.md) |
-
-> Você pode fazer **todo o desafio sem credenciais reais da Meta**, usando o mock. A OpenAI
-> exige uma API key (o guia explica como obter com baixíssimo custo). Se preferir, deixe a
-> chamada da LLM atrás de uma interface e forneça um "stub" — mas a integração real conta pontos.
-
----
-
-## 🚀 Como começar
+Copie as variáveis de ambiente:
 
 ```bash
-# 1. Suba a infraestrutura (Postgres, Redis, LocalStack, mock da Meta)
-docker compose up -d
-
-# 2. Confira que o mock da Meta está no ar
-curl http://localhost:8001/health
-
-# 3. Copie as variáveis de ambiente e preencha sua OPENAI_API_KEY
 cp .env.example .env
+```
 
-# 4. Instale dependências e desenvolva sua solução em src/
-npm install   # ou bun install / pnpm install
+Suba a infraestrutura:
 
-# 5. Quando seu webhook estiver no ar (porta 8000), simule uma mensagem de cliente:
+```bash
+docker compose up -d
+```
+
+Se a porta `6379` já estiver ocupada por um Redis local, o container Redis pode falhar, mas a aplicação continuará funcionando se `REDIS_URL=redis://localhost:6379` apontar para esse Redis.
+
+Instale as dependências:
+
+```bash
+npm install
+```
+
+Execute as migrations:
+
+```bash
+npm run db:migrate
+```
+
+Suba o servidor HTTP:
+
+```bash
+npm run dev
+```
+
+Em outro terminal, suba o worker:
+
+```bash
+npm run worker
+```
+
+Teste o mock da Meta:
+
+```bash
+curl http://localhost:8001/health
+```
+
+Simule uma mensagem inbound:
+
+```bash
 curl -X POST http://localhost:8001/simulate/inbound \
   -H "Content-Type: application/json" \
   -d '{ "from": "5511999990000", "text": "Quais são os planos de vocês?" }'
-
-# O mock vai ASSINAR o payload e chamar seu POST http://host.docker.internal:8000/webhook
-# Seu backend processa, chama a OpenAI e envia a resposta de volta pro mock.
 ```
 
-A porta esperada do **seu** backend é a **8000**.
+Confira a resposta enviada:
 
----
+```bash
+curl http://localhost:8001/sent
+```
 
-## 📤 Entrega
+## Scripts
 
-- Repositório Git (público ou com acesso) com **histórico de commits real** (não um único commit).
-- `README.md` próprio explicando: como rodar, suas decisões de arquitetura, **premissas** e
-  o que você deixaria para depois (e por quê).
-- Pelo menos **5 testes** cobrindo a lógica de negócio (validação de assinatura, idempotência,
-  serviço de conversa, etc.).
+```bash
+npm run dev         # servidor HTTP na porta 8000
+npm run worker      # worker BullMQ
+npm run db:generate # gera migrations Drizzle
+npm run db:migrate  # aplica migrations
+npm run typecheck   # valida TypeScript
+npm test            # executa testes
+```
 
----
+## Arquitetura
 
-## 🧮 Critérios de avaliação
+O webhook HTTP fica em `src/index.ts`. Ele valida o handshake da Meta em `GET /webhook`, valida a assinatura HMAC-SHA256 no corpo cru em `POST /webhook`, persiste a mensagem e enfileira um job BullMQ. A rota responde rápido e não chama OpenAI diretamente.
 
-| Critério | Peso | O que olhamos |
-|----------|------|---------------|
-| Arquitetura & organização | 25% | Separação de responsabilidades, fronteiras claras, modularidade |
-| Corretude do fluxo assíncrono | 20% | Webhook responde rápido, worker processa, retry em falhas |
-| Segurança & idempotência | 20% | Assinatura validada, reentrega tratada, multi-tenant isolado |
-| Qualidade do código | 15% | Legibilidade, tipagem, tratamento de erros, naming |
-| Integração com a LLM | 10% | Contexto/RAG, respostas fiéis à base, controle de custo |
-| Testes | 10% | Cobrem cenários relevantes, não só caminho feliz |
+O worker fica em `src/worker.ts`. Ele consome a fila, carrega histórico da conversa e a `knowledge-base/`, gera a resposta com OpenAI quando há chave configurada, salva a mensagem outbound e envia para a Meta API/mock.
 
----
+A persistência fica em `src/db/schema.ts` e `src/services/conversation-service.ts`. O schema possui `tenants`, `contacts`, `conversations` e `messages`.
 
-## 📋 Regras
+## Idempotência
 
-- **Prazo**: 5 dias corridos a partir do recebimento.
-- **Linguagem**: Node.js + TypeScript.
-- Bibliotecas à sua escolha — documente o porquê das principais.
-- Pode usar IA como assistente. Mas **você precisa entender e defender cada decisão** —
-  na entrevista vamos conversar sobre o seu código.
+A idempotência é garantida no banco com a restrição única:
 
-Boa sorte! 🚀
+```text
+tenant_id + wa_message_id
+```
+
+Quando a Meta reentrega o mesmo `message.id`, a aplicação não cria outra mensagem nem enfileira outro processamento.
+
+## Multi-Tenant
+
+Todas as entidades principais possuem `tenant_id`. O tenant é derivado do `metadata.phone_number_id` recebido no webhook. Nas rotas REST, o tenant pode ser informado por `x-tenant-id` ou resolvido por `x-phone-number-id`.
+
+Rotas disponíveis:
+
+```bash
+GET /conversations
+GET /conversations/:id/messages
+```
+
+## LLM e Base de Conhecimento
+
+O worker monta o contexto com:
+
+- Histórico recente da conversa.
+- Arquivos Markdown de `knowledge-base/`.
+
+Se `OPENAI_API_KEY` estiver configurada com uma chave real, a resposta é gerada pela OpenAI com temperatura baixa e instrução explícita para usar apenas a base.
+
+Se a chave estiver ausente ou igual ao placeholder do `.env.example`, a aplicação usa um fallback determinístico para os temas cobertos pela base: planos, boleto, instalação, suporte, cobertura e cancelamento. Para temas fora da base, responde que não encontrou a informação.
+
+## Resiliência e Observabilidade
+
+Os jobs BullMQ usam retry com backoff exponencial:
+
+```text
+attempts: 3
+backoff: exponential, 5s
+```
+
+Os logs são estruturados com Pino e incluem dados como `tenantId`, `conversationId`, `messageId` e `jobId` para facilitar rastreio de atendimento.
+
+## Testes
+
+Execute:
+
+```bash
+npm test
+```
+
+Coberturas principais:
+
+- Assinatura HMAC-SHA256 válida, inválida e ausente.
+- Extração de mensagens do payload da Meta.
+- Fallback da assistente sem OpenAI.
+- Resposta segura para assunto fora da base.
+- Restrições de schema para idempotência e isolamento por tenant.
+
+Também foi validado:
+
+```bash
+npm run typecheck
+```
+
+## Teste Manual Realizado
+
+Fluxo validado localmente com mock:
+
+```bash
+curl http://localhost:8001/health
+```
+
+Retorno:
+
+```json
+{"ok":true,"service":"mock-meta","webhook":"http://host.docker.internal:8000/webhook"}
+```
+
+Simulação:
+
+```bash
+curl -X POST http://localhost:8001/simulate/inbound \
+  -H "Content-Type: application/json" \
+  -d '{ "from": "5511999990000", "text": "Quais são os planos de vocês?" }'
+```
+
+Resposta enviada ao mock:
+
+```json
+{
+  "to": "5511999990000",
+  "type": "text",
+  "text": "Temos os planos Fibra Start 300 Mbps por R$ 79,90, Fibra Plus 600 Mbps por R$ 99,90 e Fibra Max 1 Gbps por R$ 149,90. Todos incluem Wi-Fi 6, instalação grátis e roteador em comodato.",
+  "authorization": "present"
+}
+```
+
+## Decisões Técnicas
+
+Escolhi Fastify pela simplicidade e boa performance para webhooks. Usei Drizzle porque mantém o schema tipado e migrations explícitas. BullMQ foi escolhido por usar Redis já disponível no desafio e oferecer retry/backoff de forma direta. O fallback sem OpenAI permite demonstrar o fluxo completo mesmo sem credenciais reais, sem inventar informações fora da base.
+
+## O Que Ficaria Para Depois
+
+- Autenticação real das rotas REST, além dos headers usados no ambiente local.
+- RAG com busca semântica ou embeddings para bases maiores.
+- Function calling para consultar status de pedido/chamado.
+- Métricas com Prometheus/OpenTelemetry.
+- Dead-letter queue para falhas permanentes.
+- Testes de integração com Postgres e Redis em containers.
